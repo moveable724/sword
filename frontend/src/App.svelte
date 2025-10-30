@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  // ===== API Configuration =====
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
   // ===== Mock DB (localStorage) =====
   const LS = { users:'db_users', currentUser:'auth_user', currentAdmin:'auth_admin' };
   const MASTER = { id:'master', pw:'master123' };
@@ -284,7 +287,7 @@
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:8000/api/game/sync', {
+      const res = await fetch(`${API_URL}/api/game/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
