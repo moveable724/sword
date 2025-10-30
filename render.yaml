@@ -18,7 +18,6 @@ services:
   - type: web
     name: sword-game-frontend
     runtime: static
-    region: oregon
     plan: free
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
