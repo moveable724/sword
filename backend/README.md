@@ -30,6 +30,9 @@ FastAPI REST API for the Sword Enhancement Game.
 ```bash
 cd backend
 pip install -r requirements.txt
+# set DATABASE_URL for Postgres (Neon/Supabase/Railway) OR run with local SQLite fallback
+# Example (Neon):
+# set DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST/DBNAME?sslmode=require
 python main.py
 # or
 uvicorn main:app --reload --port 8000

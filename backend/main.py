@@ -1,12 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
-import json
+from typing import Optional
+from sqlalchemy.orm import Session
+from sqlalchemy import select, func
 import os
-from pathlib import Path
-from datetime import datetime
-import uuid
+
+from .db import get_db, Base, engine
+from .models import Trade as TradeModel, User as UserModel
 
 app = FastAPI(title="Sword Game API")
 
@@ -19,33 +20,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 데이터 디렉토리 설정
-DATA_DIR = Path(__file__).parent.parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
-DB_FILE = DATA_DIR / "db.json"
-
-# 초기 DB 구조
-DEFAULT_DATA = {
-    "trades": [],
-    "users": [],
-    "clubs": []
-}
-
-# DB 초기화
-def init_db():
-    if not DB_FILE.exists():
-        with open(DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(DEFAULT_DATA, f, ensure_ascii=False, indent=2)
-
-def read_db():
-    with open(DB_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-def write_db(data):
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-init_db()
+# Create tables on startup (simple auto-migrate)
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
 
 # ===== Models =====
 class Trade(BaseModel):
@@ -80,100 +58,111 @@ def health_check():
 
 # Trades
 @app.get("/api/leverage-trades")
-def get_trades():
-    db = read_db()
-    return {"trades": db.get("trades", [])}
+def get_trades(db: Session = Depends(get_db)):
+    stmt = select(TradeModel).order_by(TradeModel.created_at.desc())
+    rows = db.execute(stmt).scalars().all()
+    trades = [
+        {
+            "id": str(r.id),
+            "company": r.company,
+            "leverage": r.leverage,
+            "type": r.trade_type,
+            "quantity": r.quantity,
+            "user": r.user_id,
+            "createdAt": int(r.created_at.timestamp() * 1000) if r.created_at else None,
+        }
+        for r in rows
+    ]
+    return {"trades": trades}
 
 @app.post("/api/leverage-trades", status_code=201)
-def create_trade(trade: Trade):
-    db = read_db()
-    new_trade = {
-        "id": str(uuid.uuid4()),
-        "company": trade.company,
-        "leverage": trade.leverage,
-        "type": trade.type,
-        "quantity": trade.quantity,
-        "user": trade.user,
-        "createdAt": int(datetime.now().timestamp() * 1000)
+def create_trade(trade: Trade, db: Session = Depends(get_db)):
+    row = TradeModel(
+        company=trade.company,
+        leverage=trade.leverage,
+        trade_type=trade.type,
+        quantity=trade.quantity,
+        user_id=trade.user,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {
+        "trade": {
+            "id": str(row.id),
+            "company": row.company,
+            "leverage": row.leverage,
+            "type": row.trade_type,
+            "quantity": row.quantity,
+            "user": row.user_id,
+            "createdAt": int(row.created_at.timestamp() * 1000) if row.created_at else None,
+        }
     }
-    db["trades"].append(new_trade)
-    write_db(db)
-    return {"trade": new_trade}
 
 @app.delete("/api/leverage-trades/{trade_id}")
-def delete_trade(trade_id: str):
-    db = read_db()
-    before = len(db["trades"])
-    db["trades"] = [t for t in db["trades"] if t["id"] != trade_id]
-    after = len(db["trades"])
-    
-    if before == after:
+def delete_trade(trade_id: str, db: Session = Depends(get_db)):
+    # Accept both UUID and raw string
+    row = db.get(TradeModel, trade_id)
+    if not row:
         raise HTTPException(status_code=404, detail="Trade not found")
-    
-    write_db(db)
+    db.delete(row)
+    db.commit()
     return {"ok": True}
 
 # Rankings
 @app.get("/api/rankings/clubs")
-def get_club_rankings():
-    db = read_db()
-    users = db.get("users", [])
-    
-    club_totals = {}
-    for user in users:
-        club = user.get("clubName", "NoClub")
-        assets = user.get("totalAssets", user.get("maxStage", 0))
-        club_totals[club] = club_totals.get(club, 0) + assets
-    
+def get_club_rankings(db: Session = Depends(get_db)):
+    # Sum total_assets (or max_stage) per club_name
+    rows = db.execute(
+        select(
+            UserModel.club_name,
+            func.coalesce(func.sum(func.coalesce(UserModel.total_assets, UserModel.max_stage, 0)), 0),
+        ).group_by(UserModel.club_name)
+    ).all()
     rankings = [
-        {"clubName": club, "totalAssets": total}
-        for club, total in club_totals.items()
+        {"clubName": r[0] or "NoClub", "totalAssets": int(r[1] or 0)}
+        for r in rows
     ]
     rankings.sort(key=lambda x: x["totalAssets"], reverse=True)
-    
     return {"rankings": rankings}
 
 @app.get("/api/rankings/users")
-def get_user_rankings():
-    db = read_db()
-    users = db.get("users", [])
-    
+def get_user_rankings(db: Session = Depends(get_db)):
+    rows = db.execute(select(UserModel)).scalars().all()
     rankings = [
         {
-            "username": user.get("id"),
-            "totalAssets": user.get("totalAssets", user.get("maxStage", 0))
+            "username": r.id,
+            "totalAssets": int(r.total_assets if r.total_assets is not None else (r.max_stage or 0)),
         }
-        for user in users
+        for r in rows
     ]
     rankings.sort(key=lambda x: x["totalAssets"], reverse=True)
-    
     return {"rankings": rankings}
 
 # Game sync
 @app.post("/api/game/sync")
-def sync_game(sync_data: GameSync):
-    db = read_db()
-    users = db.get("users", [])
-    
-    user_idx = next((i for i, u in enumerate(users) if u.get("id") == sync_data.userId), None)
-    
-    user_data = {
-        "id": sync_data.userId,
-        "stage": sync_data.currentStage,
-        "maxStage": sync_data.maxStage,
-        "attempts": sync_data.attempts,
-        "clubName": sync_data.clubName,
-        "totalAssets": sync_data.totalAssets if sync_data.totalAssets is not None else sync_data.maxStage
-    }
-    
-    if user_idx is not None:
-        users[user_idx] = {**users[user_idx], **user_data}
+def sync_game(sync_data: GameSync, db: Session = Depends(get_db)):
+    row = db.get(UserModel, sync_data.userId)
+    total_assets = (
+        sync_data.totalAssets if sync_data.totalAssets is not None else sync_data.maxStage
+    )
+    if row:
+        row.stage = sync_data.currentStage
+        row.max_stage = sync_data.maxStage
+        row.attempts = sync_data.attempts
+        row.club_name = sync_data.clubName
+        row.total_assets = total_assets
     else:
-        users.append(user_data)
-    
-    db["users"] = users
-    write_db(db)
-    
+        row = UserModel(
+            id=sync_data.userId,
+            stage=sync_data.currentStage,
+            max_stage=sync_data.maxStage,
+            attempts=sync_data.attempts,
+            club_name=sync_data.clubName,
+            total_assets=total_assets,
+        )
+        db.add(row)
+    db.commit()
     return {"ok": True}
 
 if __name__ == "__main__":
