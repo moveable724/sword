@@ -1,17 +1,15 @@
 services:
-  # Backend API Service
+  # Backend API Service (FastAPI)
   - type: web
     name: sword-game-backend
-    runtime: node
+    runtime: python
     region: oregon
     plan: free
-    buildCommand: cd backend && npm install
-    startCommand: cd backend && npm start
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: 8000
+      - key: PYTHON_VERSION
+        value: 3.11.0
     healthCheckPath: /
 
   # Frontend Static Site

@@ -1,6 +1,6 @@
 # Sword Game Backend
 
-Express.js REST API for the Sword Enhancement Game.
+FastAPI REST API for the Sword Enhancement Game.
 
 ## Features
 
@@ -10,16 +10,17 @@ Express.js REST API for the Sword Enhancement Game.
 
 ## Tech Stack
 
-- Node.js + Express
-- LowDB (JSON file database)
-- CORS enabled
+- Python 3.11+
+- FastAPI
+- Uvicorn (ASGI server)
+- JSON file database
 
 ## API Endpoints
 
 - `GET /` - Health check
 - `GET /api/leverage-trades` - Get all trades
 - `POST /api/leverage-trades` - Create trade
-- `DELETE /api/leverage-trades/:id` - Delete trade
+- `DELETE /api/leverage-trades/{id}` - Delete trade
 - `GET /api/rankings/clubs` - Club rankings
 - `GET /api/rankings/users` - User rankings
 - `POST /api/game/sync` - Sync game progress
@@ -28,14 +29,16 @@ Express.js REST API for the Sword Enhancement Game.
 
 ```bash
 cd backend
-npm install
-npm run dev  # Auto-reload on changes
+pip install -r requirements.txt
+python main.py
+# or
+uvicorn main:app --reload --port 8000
 ```
 
 ## Production
 
 ```bash
-npm start
+uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
 Server runs on port 8000 by default (configurable via `PORT` env var).
